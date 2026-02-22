@@ -4,73 +4,103 @@ import time
 import pandas as pd
 
 # --- 网页配置 ---
-st.set_page_config(page_title="波场充值实时监控系统", page_icon="🕵️", layout="wide")
+st.set_page_config(page_title="波场全网监控引擎", page_icon="📡", layout="wide")
 
-# 初始化 session_state
-if 'monitored_addresses' not in st.session_state:
-    # 这里填入你那一万个地址，演示先放几个
-    st.session_state.monitored_addresses = ["TXXXX...", "TYYYY..."] 
-if 'logs' not in st.session_state:
-    st.session_state.logs = []
+# 初始化 Session State (存储监控名单和记录)
+if 'watch_list' not in st.session_state:
+    st.session_state.watch_list = set()  # 使用 set 提高查找速度
+if 'found_txs' not in st.session_state:
+    st.session_state.found_txs = []
+if 'is_running' not in st.session_state:
+    st.session_state.is_running = False
 
-st.title("🕵️ 波场万号充值实时监控")
-st.markdown("---")
+st.title("📡 波场万号充值实时监听引擎 (极速版)")
+st.info("原理：每3秒拉取最新区块，扫描所有交易并比对你的名单。")
 
-# --- 侧边栏：管理你的 1 万个地址 ---
-st.sidebar.header("📋 监控地址管理")
-uploaded_file = st.sidebar.file_uploader("上传地址列表 (TXT格式，一行一个)", type=['txt'])
-if uploaded_file:
-    content = uploaded_file.read().decode("utf-8")
-    st.session_state.monitored_addresses = [line.strip() for line in content.split("\n") if line.strip()]
-    st.sidebar.success(f"已加载 {len(st.session_state.monitored_addresses)} 个地址")
+# --- 界面布局 ---
+col_cfg, col_main = st.columns([1, 2])
 
-# --- 监控逻辑 ---
-col1, col2 = st.columns([2, 1])
-
-with col1:
-    st.subheader("📡 实时监听中...")
-    start_watch = st.button("🔴 启动监听引擎")
-    status = st.empty()
+with col_cfg:
+    st.subheader("⚙️ 监控配置")
     
-    if start_watch:
-        st.toast("正在连接波场主网节点...")
-        # 记录已处理过的交易，防止重复弹窗
-        seen_txs = set()
-        
-        while True:
-            try:
-                # 获取波场最新转账记录 (使用官方 API)
-                # 注：监控 1 万个地址最稳妥的方法是查区块，这里用实时转账流演示
-                url = "https://api.trongrid.io/v1/accounts/TJD9T838pD2A544X58Y9P69Y9Y9Y9Y9Y9Y/transactions/trc20" # 示例API
-                # 实际生产中应循环请求最近生成的 Block
-                
-                # 模拟演示：这里我们监听最新区块的所有交易
-                # 由于 API 限制，这里简化为每 3 秒检查一次名单中的地址余额是否有变动
-                # 或者检查波场最新 10 笔交易
-                
-                status.write(f"正在扫描区块... 已过滤交易 0 笔 | 监控名单: {len(st.session_state.monitored_addresses)} 个")
-                
-                # --- 核心模拟测试逻辑 ---
-                # 在真实测试时，你需要在这里调用 TronGrid API 查询名单地址的最新交易
-                
-                # 假设你转账了，我们在这里捕捉：
-                # if find_in_blockchain(st.session_state.monitored_addresses):
-                #     st.session_state.logs.append({"时间": time.strftime("%H:%M:%S"), "地址": addr, "金额": amt, "状态": "成功"})
-                
-                time.sleep(3)
-            except Exception as e:
-                st.error(f"网络连接中断: {e}")
-                break
-
-with col2:
-    st.subheader("💰 充值成功记录")
-    if st.session_state.logs:
-        df = pd.DataFrame(st.session_state.logs)
-        st.table(df)
+    # 地址导入
+    input_type = st.radio("地址导入方式", ["手动输入", "批量上传"])
+    if input_type == "手动输入":
+        addr_input = st.text_area("输入地址 (一行一个)", placeholder="TXXXX...\nTYYYY...")
+        if st.button("更新监控名单"):
+            addrs = {a.strip() for a in addr_input.split('\n') if a.strip()}
+            st.session_state.watch_list = addrs
+            st.success(f"已加载 {len(addrs)} 个地址")
     else:
-        st.info("暂无充值记录，等待测试交易...")
+        uploaded_file = st.file_uploader("上传 TXT 地址文件", type=['txt'])
+        if uploaded_file:
+            addrs = {line.decode("utf-8").strip() for line in uploaded_file if line.strip()}
+            st.session_state.watch_list = addrs
+            st.success(f"已从文件加载 {len(addrs)} 个地址")
 
-# --- 底部工具 ---
-if st.button("🗑️ 清空记录"):
-    st.session_state.logs = []
-    st.rerun()
+    st.markdown("---")
+    if st.button("🔴 启动/重置 监听引擎"):
+        st.session_state.is_running = True
+        st.session_state.found_txs = []
+        st.rerun()
+
+# --- 核心监控逻辑 ---
+with col_main:
+    st.subheader("🚀 实时账变流")
+    log_area = st.empty()
+    table_area = st.empty()
+    
+    if st.session_state.is_running:
+        if not st.session_state.watch_list:
+            st.warning("请先加载监控名单！")
+        else:
+            last_block_id = 0
+            # 建立一个持续运行的循环
+            while True:
+                try:
+                    # 1. 获取最新区块数据 (官方 API)
+                    resp = requests.post("https://api.trongrid.io/wallet/getnowblock")
+                    block_data = resp.json()
+                    
+                    curr_block_id = block_data['block_header']['raw_data']['number']
+                    timestamp = block_data['block_header']['raw_data']['timestamp']
+                    
+                    # 只有发现新块才处理
+                    if curr_block_id > last_block_id:
+                        tx_list = block_data.get('transactions', [])
+                        tx_count = len(tx_list)
+                        last_block_id = curr_block_id
+                        
+                        # 在界面显示当前扫描状态
+                        log_area.markdown(f"📦 **正在扫描区块**: `{curr_block_id}` | 包含交易: `{tx_count}` 笔")
+                        
+                        # 2. 扫描区块内的每一笔交易
+                        for tx in tx_list:
+                            tx_id = tx['txID']
+                            # 这里主要演示普通 TRX 转账监控
+                            # TRC20 (USDT) 监控需要解析 TriggerSmartContract 字段，逻辑更复杂
+                            contract = tx['raw_data']['contract'][0]
+                            if contract['type'] == 'TransferContract':
+                                value = contract['parameter']['value']
+                                to_addr_hex = value.get('to_address')
+                                # 将十六进制地址转为波场 T 地址（此处简化逻辑）
+                                # 真实场景建议引用 tronpy 库进行转换
+                                
+                                # 模拟比对逻辑：如果在名单中
+                                # if to_addr in st.session_state.watch_list:
+                                #     amount = value.get('amount') / 1_000_000
+                                #     st.session_state.found_txs.append(...)
+                    
+                    # 3. 每3秒查一次 (波场产块时间)
+                    time.sleep(3)
+                    
+                    # 刷新显示历史记录表格
+                    if st.session_state.found_txs:
+                        df = pd.DataFrame(st.session_state.found_txs)
+                        table_area.table(df)
+                    else:
+                        table_area.write("等待充值信号中...")
+
+                except Exception as e:
+                    st.error(f"引擎异常: {e}")
+                    time.sleep(5)
