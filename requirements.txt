@@ -1,2 +1,2 @@
-trident-python
+eth-account
 streamlit
