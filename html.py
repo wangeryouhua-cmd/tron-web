@@ -1,45 +1,42 @@
-# --- 兼容性补丁开始 ---
-import sys
-try:
-    import pkg_resources
-except ImportError:
-    import pip
-    import subprocess
-    # 如果真的没有，我们强行让 Python 环境在运行瞬间装载它
-    from setuptools import distutils
-# --- 兼容性补丁结束 ---
-
 import streamlit as st
-from tronapi import Tron
-import time
-import streamlit as st
-from tronapi import Tron
+from trident.account import Account
 import time
 
-# 网页标题
+# --- 网页标题 ---
+st.set_page_config(page_title="波场靓号生成器", page_icon="🚀")
 st.title("波场靓号生成器 🚀")
-st.write("点击下方按钮开始扫号，结果会自动显示。")
+st.write("使用最新 trident 引擎，适配 Python 3.13。")
 
-# 开始按钮
+# --- 侧边栏配置 ---
+st.sidebar.header("扫号设置")
+suffix = st.sidebar.text_input("请输入想要查找的结尾（如：666）", "888")
+
+# --- 开始按钮 ---
 if st.button('开始扫号'):
-    # 这里放你的 Tron 初始化逻辑
-    full_node = 'https://api.trongrid.io'
-    tron = Tron(full_node=full_node, solidity_node=full_node, event_server=full_node)
+    st.info(f"正在搜寻以 {suffix} 结尾的靓号... 发现后会立即显示在下方。")
     
-    st.info("程序运行中... 发现靓号后会立即显示在下方。")
-    
-    # 建立一个占位符，用来实时刷新显示
+    # 建立一个占位符，用来实时刷新显示进度
     status_text = st.empty()
+    result_area = st.container()
     
+    count = 0
     while True:
-        account = tron.create_account
-        b58 = account.address.base58
+        # 使用 trident 库生成随机账号
+        acc = Account.create()
+        address = acc.address
+        private_key = acc.private_key
         
-        # 在网页上实时显示进度
-        status_text.text(f"当前检查地址: {b58}")
+        count += 1
         
-        # 简单的逻辑判断（以4位连尾为例）
-        if b58[-4:] == (b58[-1]*4):
-            st.success(f"找到靓号！ 地址: {b58} | 私钥: {account.private_key}")
-            # 这里可以加个停止或者保存逻辑
-
+        # 在网页上实时显示进度（每10次刷新一次界面，提高性能）
+        if count % 10 == 0:
+            status_text.text(f"已检查 {count} 个地址，当前：{address}")
+        
+        # 逻辑判断：是否以指定字符结尾
+        if address.endswith(suffix):
+            with result_area:
+                st.success(f"✨ 找到靓号！(第 {count} 次尝试)")
+                st.code(f"地址: {address}\n私钥: {private_key}")
+            
+            # 找到一个后停止，或者你可以注释掉 break 让它继续找
+            break
