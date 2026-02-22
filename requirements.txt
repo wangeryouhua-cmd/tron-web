@@ -1,3 +1,2 @@
-tronapi
+trident-python
 streamlit
-setuptools
