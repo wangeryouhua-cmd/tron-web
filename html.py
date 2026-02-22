@@ -1,79 +1,76 @@
 import streamlit as st
-from eth_account import Account
-import secrets
-import base58
-import hashlib
-
-# 1. 核心转换函数：将以太坊地址转为波场 T 开头地址
-def to_tron_address(eth_address):
-    # 去掉 0x，补上波场前缀 41
-    hex_addr = "41" + eth_address[2:]
-    addr_byte = bytes.fromhex(hex_addr)
-    # 计算两次 SHA256 校验码
-    hash1 = hashlib.sha256(addr_byte).digest()
-    hash2 = hashlib.sha256(hash1).digest()
-    # 拼接前缀与校验码的前4位
-    raw_data = addr_byte + hash2[:4]
-    return base58.b58encode(raw_data).decode()
+import requests
+import time
+import pandas as pd
 
 # --- 网页配置 ---
-st.set_page_config(page_title="波场极速扫号专业版", page_icon="🔥", layout="wide")
+st.set_page_config(page_title="波场充值实时监控系统", page_icon="🕵️", layout="wide")
 
-# 初始化历史记录存储（如果不存在）
-if 'history' not in st.session_state:
-    st.session_state.history = []
+# 初始化 session_state
+if 'monitored_addresses' not in st.session_state:
+    # 这里填入你那一万个地址，演示先放几个
+    st.session_state.monitored_addresses = ["TXXXX...", "TYYYY..."] 
+if 'logs' not in st.session_state:
+    st.session_state.logs = []
 
-st.title("🔥 波场极速扫号专业版")
+st.title("🕵️ 波场万号充值实时监控")
 st.markdown("---")
 
-# 侧边栏设置
-st.sidebar.header("⚙️ 扫号配置")
-target = st.sidebar.text_input("想要匹配的结尾 (例如: 666)", "888")
-show_all = st.sidebar.checkbox("实时显示扫描详情 (勾选会略微降低速度)", True)
+# --- 侧边栏：管理你的 1 万个地址 ---
+st.sidebar.header("📋 监控地址管理")
+uploaded_file = st.sidebar.file_uploader("上传地址列表 (TXT格式，一行一个)", type=['txt'])
+if uploaded_file:
+    content = uploaded_file.read().decode("utf-8")
+    st.session_state.monitored_addresses = [line.strip() for line in content.split("\n") if line.strip()]
+    st.sidebar.success(f"已加载 {len(st.session_state.monitored_addresses)} 个地址")
 
+# --- 监控逻辑 ---
 col1, col2 = st.columns([2, 1])
 
 with col1:
-    start_btn = st.button('🚀 开始无间断扫号')
-    stop_btn = st.button('🛑 停止扫描')
+    st.subheader("📡 实时监听中...")
+    start_watch = st.button("🔴 启动监听引擎")
+    status = st.empty()
     
-    status_area = st.empty()
-    latest_result = st.container()
+    if start_watch:
+        st.toast("正在连接波场主网节点...")
+        # 记录已处理过的交易，防止重复弹窗
+        seen_txs = set()
+        
+        while True:
+            try:
+                # 获取波场最新转账记录 (使用官方 API)
+                # 注：监控 1 万个地址最稳妥的方法是查区块，这里用实时转账流演示
+                url = "https://api.trongrid.io/v1/accounts/TJD9T838pD2A544X58Y9P69Y9Y9Y9Y9Y9Y/transactions/trc20" # 示例API
+                # 实际生产中应循环请求最近生成的 Block
+                
+                # 模拟演示：这里我们监听最新区块的所有交易
+                # 由于 API 限制，这里简化为每 3 秒检查一次名单中的地址余额是否有变动
+                # 或者检查波场最新 10 笔交易
+                
+                status.write(f"正在扫描区块... 已过滤交易 0 笔 | 监控名单: {len(st.session_state.monitored_addresses)} 个")
+                
+                # --- 核心模拟测试逻辑 ---
+                # 在真实测试时，你需要在这里调用 TronGrid API 查询名单地址的最新交易
+                
+                # 假设你转账了，我们在这里捕捉：
+                # if find_in_blockchain(st.session_state.monitored_addresses):
+                #     st.session_state.logs.append({"时间": time.strftime("%H:%M:%S"), "地址": addr, "金额": amt, "状态": "成功"})
+                
+                time.sleep(3)
+            except Exception as e:
+                st.error(f"网络连接中断: {e}")
+                break
 
 with col2:
-    st.subheader("📋 历史保存记录")
-    history_display = st.empty()
+    st.subheader("💰 充值成功记录")
+    if st.session_state.logs:
+        df = pd.DataFrame(st.session_state.logs)
+        st.table(df)
+    else:
+        st.info("暂无充值记录，等待测试交易...")
 
-# --- 扫号逻辑 ---
-if start_btn:
-    st.toast("引擎已启动，正在疯狂搜索中...", icon='🚀')
-    count = 0
-    
-    while True:
-        # 1. 生成新账号
-        priv_key = "0x" + secrets.token_hex(32)
-        acc = Account.from_key(priv_key)
-        tron_addr = to_tron_address(acc.address)
-        count += 1
-        
-        # 2. 实时进度展示
-        if count % 10 == 0 and show_all:
-            status_area.info(f"⚡ 已扫描: `{count}` 次 | 当前测试: `{tron_addr}`")
-            
-        # 3. 匹配逻辑
-        if tron_addr.endswith(target):
-            res_msg = f"✨ 找到靓号！第 {count} 次尝试"
-            with latest_result:
-                st.success(res_msg)
-                st.code(f"波场地址: {tron_addr}\n私钥明文: {priv_key}")
-            
-            # 保存到历史记录（添加到列表首位）
-            st.session_state.history.insert(0, f"地址: {tron_addr} | 私钥: {priv_key}")
-            
-            # 更新历史显示
-            with history_display.container():
-                for item in st.session_state.history:
-                    st.text(item)
-            
-            st.balloons()
-            # 注意：这里不再使用 break，它会一直扫下去
+# --- 底部工具 ---
+if st.button("🗑️ 清空记录"):
+    st.session_state.logs = []
+    st.rerun()
