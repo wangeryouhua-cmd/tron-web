@@ -1,3 +1,17 @@
+# --- 兼容性补丁开始 ---
+import sys
+try:
+    import pkg_resources
+except ImportError:
+    import pip
+    import subprocess
+    # 如果真的没有，我们强行让 Python 环境在运行瞬间装载它
+    from setuptools import distutils
+# --- 兼容性补丁结束 ---
+
+import streamlit as st
+from tronapi import Tron
+import time
 import streamlit as st
 from tronapi import Tron
 import time
@@ -28,3 +42,4 @@ if st.button('开始扫号'):
         if b58[-4:] == (b58[-1]*4):
             st.success(f"找到靓号！ 地址: {b58} | 私钥: {account.private_key}")
             # 这里可以加个停止或者保存逻辑
+
